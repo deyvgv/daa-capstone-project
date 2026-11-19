@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Campus Real-Time Demo</title>
+  <style>
+    :root { --bg: #f6f7f9; --card: #fff; --text: #1d2330; --muted: #667085; --accent: #2457d6; --border: #e3e6ec; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #11141a; --card: #1a1f28; --text: #e7eaf0; --muted: #98a2b3; --accent: #6b93ff; --border: #2a3140; } }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 15px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--text); }
+    main { max-width: 860px; margin: 0 auto; padding: 24px 16px; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    p.sub { color: var(--muted); margin: 0 0 20px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+    form { display: flex; flex-wrap: wrap; gap: 8px; }
+    input, select, button { font: inherit; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--card); color: var(--text); }
+    input { flex: 1 1 200px; }
+    button { background: var(--accent); color: #fff; border: 0; cursor: pointer; }
+    #status { color: var(--muted); margin-top: 8px; font-size: 14px; }
+    #rooms { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); word-break: break-all; }
+    .event { border-left: 3px solid var(--accent); padding: 6px 10px; margin: 8px 0; }
+    .event b { display: block; }
+    .event time { color: var(--muted); font-size: 12px; }
+    pre { margin: 4px 0 0; white-space: pre-wrap; word-break: break-word; font-size: 12px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Campus real-time notifications</h1>
+  <p class="sub">Log in with a seeded account, then publish an announcement or mark attendance from Postman to see events arrive here.</p>
+
+  <div class="card">
+    <form id="login">
+      <select id="preset">
+        <option value="student001@campus.edu">student001 (student)</option>
+        <option value="student003@campus.edu">student003 (low attendance)</option>
+        <option value="ravi.kumar@campus.edu">ravi.kumar (faculty)</option>
+        <option value="admin@campus.edu">admin</option>
+      </select>
+      <input id="email" type="email" placeholder="email" value="student001@campus.edu" />
+      <input id="password" type="password" placeholder="password" value="Password@123" />
+      <button type="submit">Connect</button>
+    </form>
+    <div id="status">Not connected</div>
+    <div id="rooms"></div>
+  </div>
+
+  <div class="card">
+    <strong>Events</strong>
+    <div id="events"></div>
+  </div>
+</main>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+  let socket;
+  $('preset').addEventListener('change', (e) => ($('email').value = e.target.value));
+
+  function addEvent(name, payload) {
+    const div = document.createElement('div');
+    div.className = 'event';
+    const b = document.createElement('b');
+    b.textContent = name;
+    const t = document.createElement('time');
+    t.textContent = new Date().toLocaleTimeString();
+    const pre = document.createElement('pre');
+    pre.textContent = JSON.stringify(payload, null, 2);
+    div.append(b, t, pre);
+    $('events').prepend(div);
+  }
+
+  $('login').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (socket) socket.disconnect();
+    $('status').textContent = 'Logging in...';
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: $('email').value, password: $('password').value }),
+    });
+    const body = await res.json();
+    if (!res.ok) { $('status').textContent = 'Login failed: ' + body.error.message; return; }
+
+    socket = io({ auth: { token: body.data.accessToken } });
+    socket.on('connect', () => ($('status').textContent = `Connected as ${body.data.user.name} (${body.data.user.role})`));
+    socket.on('connect_error', (err) => ($('status').textContent = 'Socket refused: ' + err.message));
+    socket.on('disconnect', () => ($('status').textContent = 'Disconnected'));
+    socket.on('connected', (p) => ($('rooms').textContent = 'Rooms: ' + p.rooms.join(', ')));
+    socket.onAny((name, payload) => name !== 'connected' && addEvent(name, payload));
+  });
+</script>
+</body>
+</html>
